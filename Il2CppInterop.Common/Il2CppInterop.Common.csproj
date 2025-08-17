@@ -5,7 +5,6 @@
     <Authors>BepInEx, knah et al.</Authors>
     <Description>Common API for Il2CppInterop packages</Description>
     <RootNamespace>Il2CppInterop.Common</RootNamespace>
-    <RestoreSources>https://nuget.samboy.dev/v3/index.json;$(RestoreSources)</RestoreSources>
   </PropertyGroup>
 
   <ItemGroup>
