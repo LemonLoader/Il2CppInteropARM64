@@ -40,62 +40,44 @@ namespace Il2CppInterop.Runtime.Injection.Hooks
             return Original(gmethod, copyMethodPtr);
         }
 
-        private static readonly MemoryUtils.SignatureDefinition[] s_Signatures =
-        {
-            // Unity 2021.2.5 (x64)
-            new MemoryUtils.SignatureDefinition
-            {
-                pattern = "\x48\x89\x5C\x24\x08\x48\x89\x6C\x24\x10\x56\x57\x41\x54\x41\x56\x41\x57\x48\x81\xEC\xB0\x00",
-                mask = "xxxxxxxxxxxxxxxxxxxxxxx",
-                xref = false
-            }
-        };
-
         public override IntPtr FindTargetMethod()
         {
-            // On Unity 2021.2+, the 3 parameter shim can be inlined and optimized by the compiler
-            // which moves the method we're looking for
-            var genericMethodGetMethod = s_Signatures
-                .Select(s => MemoryUtils.FindSignatureInModule(InjectorHelpers.Il2CppModule, s))
-                .FirstOrDefault(p => p != 0);
+            var genericMethodGetMethod = IntPtr.Zero;
 
-            if (genericMethodGetMethod == 0)
+            var getVirtualMethodAPI = InjectorHelpers.GetIl2CppExport(nameof(IL2CPP.il2cpp_object_get_virtual_method));
+            Logger.Instance.LogTrace("il2cpp_object_get_virtual_method: 0x{GetVirtualMethodApiAddress}", getVirtualMethodAPI.ToInt64().ToString("X2"));
+
+            var getVirtualMethod = XrefScannerLowLevel.JumpTargets(getVirtualMethodAPI).Single();
+            Logger.Instance.LogTrace("Object::GetVirtualMethod: 0x{GetVirtualMethodAddress}", getVirtualMethod.ToInt64().ToString("X2"));
+
+            var getVirtualMethodXrefs = XrefScannerLowLevel.JumpTargets(getVirtualMethod).ToArray();
+
+            // If the game is built with IL2CPP Master setting, this will return 0 entries, so we do another xref scan with retn instructions ignored.
+            if (getVirtualMethodXrefs.Length == 0)
             {
-                var getVirtualMethodAPI = InjectorHelpers.GetIl2CppExport(nameof(IL2CPP.il2cpp_object_get_virtual_method));
-                Logger.Instance.LogTrace("il2cpp_object_get_virtual_method: 0x{GetVirtualMethodApiAddress}", getVirtualMethodAPI.ToInt64().ToString("X2"));
-
-                var getVirtualMethod = XrefScannerLowLevel.JumpTargets(getVirtualMethodAPI).Single();
-                Logger.Instance.LogTrace("Object::GetVirtualMethod: 0x{GetVirtualMethodAddress}", getVirtualMethod.ToInt64().ToString("X2"));
-
-                var getVirtualMethodXrefs = XrefScannerLowLevel.JumpTargets(getVirtualMethod).ToArray();
-
-                // If the game is built with IL2CPP Master setting, this will return 0 entries, so we do another xref scan with retn instructions ignored.
-                if (getVirtualMethodXrefs.Length == 0)
+                genericMethodGetMethod = XrefScannerLowLevel.JumpTargets(getVirtualMethod, true).Last();
+            }
+            else
+            {
+                // U2021.2.0+, there's additional shim that takes 3 parameters
+                // On U2020.3.41+ there is also a shim, which gets inlined with one added in U2021.2.0+ in release builds
+                if (UnityVersionHandler.HasShimForGetMethod)
                 {
-                    genericMethodGetMethod = XrefScannerLowLevel.JumpTargets(getVirtualMethod, true).Last();
+                    var shim = getVirtualMethodXrefs.Last();
+
+                    var shimXrefs = XrefScannerLowLevel.JumpTargets(shim).ToArray();
+
+                    // If the xref count is 1, it probably means the target is after ret
+                    if (Il2CppInteropRuntime.Instance.UnityVersion.Major == 2020 && shimXrefs.Length == 1)
+                    {
+                        shimXrefs = XrefScannerLowLevel.JumpTargets(shim, true).ToArray();
+                    }
+
+                    genericMethodGetMethod = shimXrefs.Take(2).Last();
                 }
                 else
                 {
-                    // U2021.2.0+, there's additional shim that takes 3 parameters
-                    // On U2020.3.41+ there is also a shim, which gets inlined with one added in U2021.2.0+ in release builds
-                    if (UnityVersionHandler.HasShimForGetMethod)
-                    {
-                        var shim = getVirtualMethodXrefs.Last();
-
-                        var shimXrefs = XrefScannerLowLevel.JumpTargets(shim).ToArray();
-
-                        // If the xref count is 1, it probably means the target is after ret
-                        if (Il2CppInteropRuntime.Instance.UnityVersion.Major == 2020 && shimXrefs.Length == 1)
-                        {
-                            shimXrefs = XrefScannerLowLevel.JumpTargets(shim, true).ToArray();
-                        }
-
-                        genericMethodGetMethod = shimXrefs.Take(2).Last();
-                    }
-                    else
-                    {
-                        genericMethodGetMethod = getVirtualMethodXrefs.Last();
-                    }
+                    genericMethodGetMethod = getVirtualMethodXrefs.Last();
                 }
             }
 

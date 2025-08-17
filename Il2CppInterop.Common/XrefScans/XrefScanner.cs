@@ -1,5 +1,5 @@
 using System.Reflection;
-using Iced.Intel;
+using Disarm;
 using Il2CppInterop.Common.Attributes;
 using Microsoft.Extensions.Logging;
 
@@ -48,55 +48,37 @@ public static class XrefScanner
         return XrefScanMethodDb.ListUsers(cachedAttribute);
     }
 
-    internal static unsafe Decoder DecoderForAddress(IntPtr codeStart, int lengthLimit = 1000)
+    internal static unsafe IEnumerable<Arm64Instruction> DecoderForAddress(IntPtr codeStart, int lengthLimit = 1000)
     {
         if (codeStart == IntPtr.Zero) throw new NullReferenceException(nameof(codeStart));
-
-        var stream = new UnmanagedMemoryStream((byte*)codeStart, lengthLimit, lengthLimit, FileAccess.Read);
-        var codeReader = new StreamCodeReader(stream);
-        var decoder = Decoder.Create(IntPtr.Size * 8, codeReader);
-        decoder.IP = (ulong)codeStart;
-
-        return decoder;
+        return Disassembler.Disassemble((byte*)codeStart, lengthLimit, (ulong)codeStart, Disassembler.Options.IgnoreErrors);
     }
 
-    internal static IEnumerable<XrefInstance> XrefScanImpl(Decoder decoder, bool skipClassCheck = false)
+    internal static IEnumerable<XrefInstance> XrefScanImpl(IEnumerable<Arm64Instruction> decoder, bool skipClassCheck = false)
     {
-        while (true)
+        foreach (Arm64Instruction instruction in decoder)
         {
-            decoder.Decode(out var instruction);
-            if (decoder.LastError == DecoderError.NoMoreBytes) yield break;
-
-            if (instruction.FlowControl == FlowControl.Return)
+            if (instruction.MnemonicCategory.HasFlag(Arm64MnemonicCategory.Return))
                 yield break;
 
-            if (instruction.Mnemonic == Mnemonic.Int || instruction.Mnemonic == Mnemonic.Int1)
-                yield break;
-
-            if (instruction.Mnemonic == Mnemonic.Call || instruction.Mnemonic == Mnemonic.Jmp)
+            if (instruction.Mnemonic == Arm64Mnemonic.BL || instruction.Mnemonic == Arm64Mnemonic.B)
             {
                 var targetAddress = ExtractTargetAddress(instruction);
                 if (targetAddress != 0)
-                    yield return new XrefInstance(XrefType.Method, (nint)targetAddress, (nint)instruction.IP);
+                    yield return new XrefInstance(XrefType.Method, (nint)targetAddress, (nint)instruction.Address);
                 continue;
             }
 
-            if (instruction.FlowControl == FlowControl.UnconditionalBranch)
-                continue;
-
-            if (IsMoveMnemonic(instruction.Mnemonic))
+            if (instruction.MnemonicCategory.HasFlag(Arm64MnemonicCategory.Move))
             {
                 XrefInstance? result = null;
                 try
                 {
-                    if (instruction.Op1Kind == OpKind.Memory && instruction.IsIPRelativeMemoryOperand)
+                    if (instruction.Op1Kind == Arm64OperandKind.ImmediatePcRelative)
                     {
-                        var movTarget = (IntPtr)instruction.IPRelativeMemoryAddress;
-                        if (instruction.MemorySize != MemorySize.UInt64)
-                            continue;
-
+                        var movTarget = (IntPtr)((long)instruction.Address + instruction.Op1Imm);
                         if (skipClassCheck || XrefScannerManager.Impl.XrefGlobalClassFilter(movTarget))
-                            result = new XrefInstance(XrefType.Global, movTarget, (IntPtr)instruction.IP);
+                            result = new XrefInstance(XrefType.Global, movTarget, (IntPtr)instruction.Address);
                     }
                 }
                 catch (Exception ex)
@@ -110,27 +92,13 @@ public static class XrefScanner
         }
     }
 
-    internal static bool IsMoveMnemonic(Mnemonic mnemonic)
+    internal static ulong ExtractTargetAddress(in Arm64Instruction instruction)
     {
-        return mnemonic is Mnemonic.Mov or >= Mnemonic.Cmova and <= Mnemonic.Cmovs;
-    }
-
-    internal static ulong ExtractTargetAddress(in Instruction instruction)
-    {
-        switch (instruction.Op0Kind)
+        return instruction.Op0Kind switch
         {
-            case OpKind.NearBranch16:
-                return instruction.NearBranch16;
-            case OpKind.NearBranch32:
-                return instruction.NearBranch32;
-            case OpKind.NearBranch64:
-                return instruction.NearBranch64;
-            case OpKind.FarBranch16:
-                return instruction.FarBranch16;
-            case OpKind.FarBranch32:
-                return instruction.FarBranch32;
-            default:
-                return 0;
-        }
+            Arm64OperandKind.Immediate => (ulong)instruction.Op0Imm,
+            Arm64OperandKind.ImmediatePcRelative => instruction.Address + (ulong)instruction.Op0Imm,
+            _ => 0,
+        };
     }
 }

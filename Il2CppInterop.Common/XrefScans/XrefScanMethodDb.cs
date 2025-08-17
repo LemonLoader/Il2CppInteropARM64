@@ -21,7 +21,7 @@ public static class XrefScanMethodDb
         XrefScanCache = new MethodXrefScanCache(GeneratedDatabasesUtil.GetDatabasePath(MethodXrefScanCache.FileName));
 
         foreach (ProcessModule module in Process.GetCurrentProcess().Modules)
-            if (module.ModuleName == "GameAssembly.dll")
+            if (module.ModuleName == "libil2cpp.so")
             {
                 GameAssemblyBase = (long)module.BaseAddress;
                 break;

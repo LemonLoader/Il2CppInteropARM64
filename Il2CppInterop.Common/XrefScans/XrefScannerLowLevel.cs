@@ -1,4 +1,4 @@
-using Iced.Intel;
+using Disarm;
 
 namespace Il2CppInterop.Common.XrefScans;
 
@@ -9,35 +9,26 @@ public static class XrefScannerLowLevel
         return JumpTargetsImpl(XrefScanner.DecoderForAddress(codeStart), ignoreRetn);
     }
 
-    private static IEnumerable<IntPtr> JumpTargetsImpl(Decoder myDecoder, bool ignoreRetn)
+    private static IEnumerable<IntPtr> JumpTargetsImpl(IEnumerable<Arm64Instruction> myDecoder, bool ignoreRetn)
     {
         var firstFlowControl = true;
 
-        while (true)
+        foreach (Arm64Instruction instruction in myDecoder)
         {
-            myDecoder.Decode(out var instruction);
-            if (myDecoder.LastError == DecoderError.NoMoreBytes) yield break;
-
-            // 0xcc - padding after most functions
-            if (instruction.Mnemonic == Mnemonic.Int3)
+            if (instruction.MnemonicCategory.HasFlag(Arm64MnemonicCategory.Return) && !ignoreRetn)
                 yield break;
 
-            if (instruction.FlowControl == FlowControl.Return && !ignoreRetn)
-                yield break;
-
-            if (instruction.FlowControl == FlowControl.UnconditionalBranch ||
-                instruction.FlowControl == FlowControl.Call)
-            {
-                // We hope and pray that the compiler didn't use short jumps for any function calls
-                if (!instruction.IsJmpShort)
+            if (instruction is
                 {
-                    yield return (IntPtr)ExtractTargetAddress(in instruction);
-                    if (firstFlowControl && instruction.FlowControl == FlowControl.UnconditionalBranch) yield break;
-                }
-            }
-
-            if (instruction.FlowControl != FlowControl.Next)
+                    // Check if jump or call instruction
+                    Mnemonic: Arm64Mnemonic.B or Arm64Mnemonic.BC or Arm64Mnemonic.BR or Arm64Mnemonic.BL or Arm64Mnemonic.BLR,
+                    MnemonicConditionCode: Arm64ConditionCode.NONE,
+                    FinalOpConditionCode: Arm64ConditionCode.NONE
+                })
             {
+                yield return (IntPtr)ExtractTargetAddress(in instruction);
+                if (firstFlowControl && instruction.MnemonicCategory.HasFlag(Arm64MnemonicCategory.Branch)) yield break;
+
                 firstFlowControl = false;
             }
         }
@@ -48,20 +39,14 @@ public static class XrefScannerLowLevel
         return CallAndIndirectTargetsImpl(XrefScanner.DecoderForAddress(pointer, 1024 * 1024));
     }
 
-    private static IEnumerable<IntPtr> CallAndIndirectTargetsImpl(Decoder decoder)
+    private static IEnumerable<IntPtr> CallAndIndirectTargetsImpl(IEnumerable<Arm64Instruction> decoder)
     {
-        while (true)
+        foreach (Arm64Instruction instruction in decoder)
         {
-            decoder.Decode(out var instruction);
-            if (decoder.LastError == DecoderError.NoMoreBytes) yield break;
-
-            if (instruction.FlowControl == FlowControl.Return)
+            if (instruction.MnemonicCategory.HasFlag(Arm64MnemonicCategory.Return))
                 yield break;
 
-            if (instruction.Mnemonic == Mnemonic.Int || instruction.Mnemonic == Mnemonic.Int1)
-                yield break;
-
-            if (instruction.Mnemonic == Mnemonic.Call || instruction.Mnemonic == Mnemonic.Jmp)
+            if (instruction.MnemonicCategory.HasFlag(Arm64MnemonicCategory.Branch) || instruction.MnemonicCategory.HasFlag(Arm64MnemonicCategory.ConditionalBranch))
             {
                 var targetAddress = XrefScanner.ExtractTargetAddress(instruction);
                 if (targetAddress != 0)
@@ -69,32 +54,25 @@ public static class XrefScannerLowLevel
                 continue;
             }
 
-            if (instruction.Mnemonic == Mnemonic.Lea)
-                if (instruction.MemoryBase == Register.RIP)
-                {
-                    var targetAddress = instruction.IPRelativeMemoryAddress;
-                    if (targetAddress != 0)
-                        yield return (IntPtr)targetAddress;
-                }
+            if ((instruction.Mnemonic == Arm64Mnemonic.ADR ||
+                instruction.Mnemonic == Arm64Mnemonic.ADRP) &&
+                instruction.Op0Kind == Arm64OperandKind.Register &&
+                instruction.Op1Kind == Arm64OperandKind.ImmediatePcRelative)
+            {
+                var targetAddress = (IntPtr)instruction.Op1PcRelImm;
+                if (targetAddress != IntPtr.Zero)
+                    yield return targetAddress;
+            }
         }
     }
 
-    private static ulong ExtractTargetAddress(in Instruction instruction)
+    private static ulong ExtractTargetAddress(in Arm64Instruction instruction)
     {
-        switch (instruction.Op0Kind)
+        return instruction.Op0Kind switch
         {
-            case OpKind.NearBranch16:
-                return instruction.NearBranch16;
-            case OpKind.NearBranch32:
-                return instruction.NearBranch32;
-            case OpKind.NearBranch64:
-                return instruction.NearBranch64;
-            case OpKind.FarBranch16:
-                return instruction.FarBranch16;
-            case OpKind.FarBranch32:
-                return instruction.FarBranch32;
-            default:
-                throw new ArgumentOutOfRangeException();
-        }
+            Arm64OperandKind.Immediate => (ulong)instruction.Op0Imm,
+            Arm64OperandKind.ImmediatePcRelative => instruction.Address + (ulong)instruction.Op0Imm,
+            _ => 0,
+        };
     }
 }

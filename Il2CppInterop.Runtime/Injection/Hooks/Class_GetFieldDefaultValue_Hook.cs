@@ -33,46 +33,6 @@ namespace Il2CppInterop.Runtime.Injection.Hooks
             return Original(field, out type);
         }
 
-        private static readonly MemoryUtils.SignatureDefinition[] s_Signatures =
-        {
-            // Test Game - Unity 2021.3.4 (x64)
-            new MemoryUtils.SignatureDefinition
-            {
-                pattern = "\x48\x89\x5C\x24\x08\x48\x89\x74\x24\x10\x57\x48\x83\xEC\x20\x48\x8B\x79\x10\x48\x8B\xD9\x48\x8B\xF2\x48\x2B\x9F",
-                mask = "xxxxxxxxxxxxxx?xxxxxxxxxxxxx",
-                xref = false
-            },
-            
-            // V Rising - Unity 2022.3.23 (x64)
-            new MemoryUtils.SignatureDefinition
-            {
-                pattern = "\x48\x89\x5C\x24\x08\x48\x89\x74\x24\x10\x57\x48\x83\xEC\x40\x48\x8B\x41\x10",
-                mask = "xxxxxxxxxxxxxxxxxxx",
-                xref = false
-            },
-            // GTFO - Unity 2019.4.21 (x64)
-            new MemoryUtils.SignatureDefinition
-            {
-                pattern = "\x48\x89\x5C\x24\x08\x57\x48\x83\xEC\x20\x48\x8B\x41\x10\x48\x8B\xD9\x48\x8B",
-                mask = "xxxxxxxxxxxxxxxxxxx",
-                xref = false
-            },
-            // Idle Slayer - Unity 2021.3.17 (x64)
-            new MemoryUtils.SignatureDefinition
-            {
-                pattern = "\x40\x53\x48\x83\xEC\x20\x48\x8B\xDA\xE8\x00\x00\x00\x00\x4C\x8B\xC8\x48\x85\xC0",
-                mask = "xxxxxxxxxx????xxxxxx",
-                xref = false
-            },
-            // Evony - Unity 2018.4.0 (x86)
-            new MemoryUtils.SignatureDefinition
-            {
-                pattern = "\x55\x8B\xEC\x56\xFF\x75\x08\xE8\x00\x00\x00\x00\x8B\xF0\x83\xC4\x04\x85\xF6",
-                mask = "xxxxxxxx????xxxxxxx",
-                xref = false
-            },
-        };
-
         private static nint FindClassGetFieldDefaultValueXref(bool forceICallMethod = false)
         {
             nint classGetDefaultFieldValue = 0;
@@ -120,20 +80,7 @@ namespace Il2CppInterop.Runtime.Injection.Hooks
 
         public override IntPtr FindTargetMethod()
         {
-            // NOTE: In some cases this pointer will be MetadataCache::GetFieldDefaultValueForField due to Field::GetDefaultFieldValue being
-            // inlined but we'll treat it the same even though it doesn't receive the type parameter the RDX register
-            // doesn't get cleared so we still get the same parameters
-            var classGetDefaultFieldValue = s_Signatures
-                .Select(s => MemoryUtils.FindSignatureInModule(InjectorHelpers.Il2CppModule, s))
-                .FirstOrDefault(p => p != 0);
-
-            if (classGetDefaultFieldValue == 0)
-            {
-                Logger.Instance.LogTrace("Couldn't fetch Class::GetDefaultFieldValue with signatures, using method traversal");
-                classGetDefaultFieldValue = FindClassGetFieldDefaultValueXref();
-            }
-
-            return classGetDefaultFieldValue;
+            return FindClassGetFieldDefaultValueXref();
         }
     }
 }

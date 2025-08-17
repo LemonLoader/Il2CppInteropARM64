@@ -12,6 +12,10 @@
 
 ***
 
+## Fork Credits
+- [XtraCube](https://github.com/XtraCube) (changes from [this PR](https://github.com/LemonLoader/Il2CppInterop/pull/4))
+- [BNM-Android](https://github.com/ByNameModding/BNM-Android) (references for xrefs)
+
 > **BepInEx fork of Il2CppAssemblyUnhollower is now Il2CppInterop!**
 >
 > Looking for old README and guides? Check out [`legacy-unhollower` branch](https://github.com/BepInEx/Il2CppInterop/tree/legacy-unhollower).

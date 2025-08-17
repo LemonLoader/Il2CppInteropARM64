@@ -36,7 +36,7 @@ namespace Il2CppInterop.Runtime.Injection.Hooks
             var classFromNameAPI = InjectorHelpers.GetIl2CppExport(nameof(IL2CPP.il2cpp_class_from_name));
             Logger.Instance.LogTrace("il2cpp_class_from_name: 0x{ClassFromNameApiAddress}", classFromNameAPI.ToInt64().ToString("X2"));
 
-            return XrefScannerLowLevel.JumpTargets(classFromNameAPI).Single();
+            return XrefScannerLowLevel.JumpTargets(classFromNameAPI).First();
         }
     }
 }
